@@ -1059,6 +1059,7 @@ function filter_generate_reflection($rule, $nordr, $rdr_ifs, $srcaddr, $dstaddr_
 				$toadd_array = array_merge($toadd_array, range($loc_pt[0], $loc_pt[0] + $delta));
 
 				if(!empty($toadd_array)) {
+					$target = explode(" ", trim($target));
 					foreach($toadd_array as $tda) {
 						if (empty($tda))
 							continue;
@@ -1070,7 +1071,6 @@ function filter_generate_reflection($rule, $nordr, $rdr_ifs, $srcaddr, $dstaddr_
 								$socktype = "stream";
 								$dash_u = "";
 							}
-							$target = explode(" ", trim($target));
 							foreach ($target as $targip) {
 								if (empty($targip))
 									continue;
@@ -2267,7 +2267,7 @@ EOD;
 		}
 	}
 	/* PPTPd enabled? */
-	if($pptpdcfg['mode'] && ($pptpdcfg['mode'] != "off")) {
+	if($pptpdcfg['mode'] && ($pptpdcfg['mode'] != "off") && !isset($config['system']['disablevpnrules'])) {
 		if($pptpdcfg['mode'] == "server")
 			$pptpdtarget = get_interface_ip();
 		else
@@ -2699,6 +2699,9 @@ function filter_generate_ipsec_rules() {
 		$mt = microtime();
 		echo "filter_generate_ipsec_rules() being called $mt\n";
 	}
+
+	if (isset($config['system']['disablevpnrules']))
+		return "\n# VPN Rules not added disabled in System->Advanced.\n";
 
 	$ipfrules = "\n# VPN Rules\n";
 	/* Is IP Compression enabled? */
