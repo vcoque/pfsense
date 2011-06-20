@@ -2490,4 +2490,22 @@ function upgrade_077_to_078() {
 		$config['pptpd']['radius'] = $radarr;
 	}
 }
+
+function upgrade_078_to_079() {
+	global $g;
+	/* Delete old and unused RRD file */
+	unlink_if_exists("{$g['vardb_path']}/rrd/captiveportal-totalusers.rrd");
+}
+
+function upgrade_079_to_080() {
+	global $config;
+
+	/* Upgrade config in 1.2.3 specifying a username other than admin for synching. */
+	if (!empty($config['system']['username']) && is_array($config['installedpackages']['carpsettings']) &&
+		is_array($config['installedpackages']['carpsettings']['config'])) {
+		$config['installedpackages']['carpsettings']['config'][0]['username'] = $config['system']['username'];
+		unset($config['system']['username']);
+	}
+}
+
 ?>

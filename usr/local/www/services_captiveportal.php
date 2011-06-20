@@ -300,10 +300,10 @@ function enable_change(enable_change) {
 
 	document.iform.radmac_secret.disabled = (radius_endis || !document.iform.radmac_enable.checked) && !enable_change;
 
-	var reauthenticate_dis = (radius_endis || !document.iform.reauthenticate.checked) && !enable_change;
-	document.iform.reauthenticateacct[0].disabled = reauthenticate_dis;
-	document.iform.reauthenticateacct[1].disabled = reauthenticate_dis;
-	document.iform.reauthenticateacct[2].disabled = reauthenticate_dis;
+	var radacct_dis = (radius_endis || !document.iform.radacct_enable.checked) && !enable_change;
+	document.iform.reauthenticateacct[0].disabled = radacct_dis;
+	document.iform.reauthenticateacct[1].disabled = radacct_dis;
+	document.iform.reauthenticateacct[2].disabled = radacct_dis;
 }
 //-->
 </script>
@@ -474,7 +474,7 @@ value="<?=htmlspecialchars($pconfig['maxprocperip']);?>"> <?=gettext("per client
 		  </tr>
 		<tr>
 		  <td colspan="2"><input name="auth_method" type="radio" id="auth_method" value="local" onClick="enable_change(false)" <?php if($pconfig['auth_method']=="local") echo "checked"; ?>>
-  <?=gettext("Local"); ?> <a href="system_usermanager.php"><?=gettext("User Manager"); ?></a></td>
+  <?=gettext("Local"); ?> <a href="system_usermanager.php"><?=gettext("User Manager"); ?></a> / <?=gettext("Vouchers"); ?></td>
 		  </tr>
 		<tr>
 		  <td colspan="2"><input name="auth_method" type="radio" id="auth_method" value="radius" onClick="enable_change(false)" <?php if($pconfig['auth_method']=="radius") echo "checked"; ?>>
@@ -520,8 +520,7 @@ value="<?=htmlspecialchars($pconfig['maxprocperip']);?>"> <?=gettext("per client
 			</tr>
 			<tr>
 				<td class="vncell" valign="top"><?=gettext("Shared secret"); ?>&nbsp;&nbsp;</td>
-				<td class="vtable"><input name="radiuskey2" type="text" class="formfld unknown" id="radiuskey2" size="16" 
-value="<?=htmlspecialchars($pconfig['radiuskey2']);?>"></td>
+				<td class="vtable"><input name="radiuskey2" type="text" class="formfld unknown" id="radiuskey2" size="16" value="<?=htmlspecialchars($pconfig['radiuskey2']);?>"></td>
 			</tr>
 			<tr>
 			  <td colspan="2" class="list" height="12"></td>

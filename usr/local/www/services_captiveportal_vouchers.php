@@ -39,6 +39,8 @@
 $statusurl = "status_captiveportal_vouchers.php";
 $logurl = "diag_logs_auth.php";
 
+if ($_POST['postafterlogin'])
+	$nocsrf= true;
 require("guiconfig.inc");
 require("functions.inc");
 require("filter.inc");
@@ -76,8 +78,6 @@ if (!isset($config['voucher']['rollbits']))
 	$config['voucher']['rollbits'] = 16;
 if (!isset($config['voucher']['ticketbits'])) 
 	$config['voucher']['ticketbits'] = 10;
-if (!isset($config['voucher']['saveinterval'])) 
-	$config['voucher']['saveinterval'] = 5;
 if (!isset($config['voucher']['checksumbits'])) 
 	$config['voucher']['checksumbits'] = 5;
 if (!isset($config['voucher']['magic'])) 
@@ -116,9 +116,8 @@ if ($_GET['act'] == "del") {
 		exit;
     }
 }
-
 /* print all vouchers of the selected roll */
-if ($_GET['act'] == "csv") {
+else if ($_GET['act'] == "csv") {
 	$privkey = base64_decode($config['voucher']['privatekey']);
 	if (strstr($privkey,"BEGIN RSA PRIVATE KEY")) {
 		$fd = fopen("{$g['varetc_path']}/voucher.private","w");
@@ -149,7 +148,6 @@ $pconfig['enable'] = isset($config['voucher']['enable']);
 $pconfig['charset'] = $config['voucher']['charset'];
 $pconfig['rollbits'] = $config['voucher']['rollbits'];
 $pconfig['ticketbits'] = $config['voucher']['ticketbits'];
-$pconfig['saveinterval'] = $config['voucher']['saveinterval'];
 $pconfig['checksumbits'] = $config['voucher']['checksumbits'];
 $pconfig['magic'] = $config['voucher']['magic'];
 $pconfig['publickey'] = base64_decode($config['voucher']['publickey']);
@@ -164,13 +162,19 @@ $pconfig['vouchersyncusername'] = $config['voucher']['vouchersyncusername'];
 if ($_POST) {
 
 	unset($input_errors);
+
+	if ($_POST['postafterlogin']) {
+		voucher_expire($_POST['voucher_expire']);
+		exit;
+	}
+
 	$pconfig = $_POST;
 
 	/* input validation */
 	if ($_POST['enable'] == "yes") {
 		if (!$_POST['vouchersyncusername']) { 
-			$reqdfields = explode(" ", "charset rollbits ticketbits checksumbits publickey magic saveinterval");
-			$reqdfieldsn = array(gettext("charset"),gettext("rollbits"),gettext("ticketbits"),gettext("checksumbits"),gettext("publickey"),gettext("magic"),gettext("saveinterval"));
+			$reqdfields = explode(" ", "charset rollbits ticketbits checksumbits publickey magic");
+			$reqdfieldsn = array(gettext("charset"),gettext("rollbits"),gettext("ticketbits"),gettext("checksumbits"),gettext("publickey"),gettext("magic"));
 		} else {
 			$reqdfields = explode(" ", "vouchersyncdbip vouchersyncport vouchersyncpass vouchersyncusername");
 			$reqdfieldsn = array(gettext("Synchronize Voucher Database IP"),gettext("Sync port"),gettext("Sync password"),gettext("Sync username"));
@@ -193,12 +197,12 @@ if ($_POST) {
 			$input_errors[] = gettext("# of Bits to store Ticket Id needs to be between 1..16.");
 		if ($_POST['checksumbits'] && (!is_numeric($_POST['checksumbits']) || ($_POST['checksumbits'] < 1) || ($_POST['checksumbits'] > 31))) 
 			$input_errors[] = gettext("# of Bits to store checksum needs to be between 1..31.");
-		if ($_POST['saveinterval'] && (!is_numeric($_POST['saveinterval']) || ($_POST['saveinterval'] < 1))) 
-			$input_errors[] = gettext("Save interval in minutes cant be negative.");
 		if ($_POST['publickey'] && (!strstr($_POST['publickey'],"BEGIN PUBLIC KEY"))) 
 			$input_errors[] = gettext("This doesn't look like an RSA Public key.");
 		if ($_POST['privatekey'] && (!strstr($_POST['privatekey'],"BEGIN RSA PRIVATE KEY"))) 
 			$input_errors[] = gettext("This doesn't look like an RSA Private key.");
+		if ($_POST['vouchersyncdbip'] && (is_ipaddr_configured($_POST['vouchersyncdbip']))) 
+			$input_errors[] = gettext("You cannot sync the voucher database to this host (itself).");
 	}
 
 	if (!$input_errors) {
@@ -212,7 +216,6 @@ if ($_POST) {
 			$config['voucher']['ticketbits'] = $_POST['ticketbits'];
 			$config['voucher']['checksumbits'] = $_POST['checksumbits'];
 			$config['voucher']['magic'] = $_POST['magic'];
-			$config['voucher']['saveinterval'] = $_POST['saveinterval'];
 			$config['voucher']['publickey'] = base64_encode($_POST['publickey']);
 			$config['voucher']['privatekey'] = base64_encode($_POST['privatekey']);
 			$config['voucher']['msgnoaccess'] = $_POST['msgnoaccess'];
@@ -278,8 +281,6 @@ EOF;
 							$config['voucher']['rollbits'] = $toreturn['voucher']['rollbits'];
 						if($toreturn['voucher']['ticketbits'])
 							$config['voucher']['ticketbits'] = $toreturn['voucher']['ticketbits'];
-						if($toreturn['voucher']['saveinterval'])
-							$config['voucher']['saveinterval'] = $toreturn['voucher']['saveinterval'];
 						if($toreturn['voucher']['checksumbits'])
 							$config['voucher']['checksumbits'] = $toreturn['voucher']['checksumbits'];
 						if($toreturn['voucher']['magic'])
@@ -327,7 +328,6 @@ function before_save() {
 	document.iform.charset.disabled = false;
 	document.iform.rollbits.disabled = false;
 	document.iform.ticketbits.disabled = false;
-	document.iform.saveinterval.disabled = false;
 	document.iform.checksumbits.disabled = false;
 	document.iform.magic.disabled = false;
 	document.iform.publickey.disabled = false;
@@ -344,7 +344,6 @@ function enable_change(enable_change) {
 	document.iform.charset.disabled = endis;
 	document.iform.rollbits.disabled = endis;
 	document.iform.ticketbits.disabled = endis;
-	document.iform.saveinterval.disabled = endis;
 	document.iform.checksumbits.disabled = endis;
 	document.iform.magic.disabled = endis;
 	document.iform.publickey.disabled = endis;
@@ -359,7 +358,6 @@ function enable_change(enable_change) {
 		document.iform.charset.disabled = true;
 		document.iform.rollbits.disabled = true;
 		document.iform.ticketbits.disabled = true;
-		document.iform.saveinterval.disabled = true;
 		document.iform.checksumbits.disabled = true;
 		document.iform.magic.disabled = true;
 		document.iform.publickey.disabled = true;
@@ -525,14 +523,6 @@ function enable_change(enable_change) {
 							</td>
 						</tr>
 						<tr> 
-							<td width="22%" valign="top" class="vncellreq"><?=gettext("Save Interval"); ?></td>
-							<td width="78%" class="vtable">
-								<input name="saveinterval" type="text" class="formfld" id="saveinterval" size="4" value="<?=htmlspecialchars($pconfig['saveinterval']);?>">
-								<?=gettext("Minutes"); ?><br>
-								<?=gettext("The list of active and used vouchers can be stored in the system's configuration file once every x minutes to survive power outages. No save is done if no new vouchers have been activated.  Enter 0 to never write runtime state to XML config."); ?>
-							</td>
-						</tr>
-						<tr> 
 							<td width="22%" valign="top" class="vncellreq"><?=gettext("Invalid Voucher Message"); ?></td>
 							<td width="78%" class="vtable">
 								<input name="msgnoaccess" type="text" class="formfld" id="msgnoaccess" size="80" value="<?=htmlspecialchars($pconfig['msgnoaccess']);?>">
@@ -559,7 +549,8 @@ function enable_change(enable_change) {
 							<td width="22%" valign="top" class="vncellreq"><?=gettext("Synchronize Voucher Database IP"); ?></td>
 							<td width="78%" class="vtable">
 								<input name="vouchersyncdbip" type="text" class="formfld" id="vouchersyncdbip" size="17" value="<?=htmlspecialchars($pconfig['vouchersyncdbip']);?>">
-								<br><?=gettext("IP address of master nodes webConfigurator to synchronize voucher database and used vouchers from."); ?>
+								<br/><?=gettext("IP address of master nodes webConfigurator to synchronize voucher database and used vouchers from."); ?>
+								<br/><?=gettext("NOTE: this should be setup on the slave nodes and not the primary node!"); ?>
 							</td>
 						</tr>
 						<tr> 

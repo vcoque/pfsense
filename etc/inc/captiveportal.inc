@@ -652,6 +652,13 @@ function captiveportal_prune_old() {
 	 *	had a chance to iterate over all accounts.
 	 */
 	$unsetindexes = array();
+	$voucher_needs_sync = false;
+	/* 
+	 * Snapshot the time here to use for calculation to speed up the process.
+	 * If something is missed next run will catch it!
+	 */
+	$pruning_time = time();
+	$stop_time = $pruning_time;
 	foreach ($cpdb as $cpentry) {
 
 		$timedout = false;
@@ -659,7 +666,7 @@ function captiveportal_prune_old() {
 
 		/* hard timeout? */
 		if ($timeout) {
-			if ((time() - $cpentry[0]) >= $timeout) {
+			if (($pruning_time - $cpentry[0]) >= $timeout) {
 				$timedout = true;
 				$term_cause = 5; // Session-Timeout
 			}
@@ -667,7 +674,7 @@ function captiveportal_prune_old() {
 
 		/* Session-Terminate-Time */
 		if (!$timedout && !empty($cpentry[9])) {
-			if (time() >= $cpentry[9]) {
+			if ($pruning_time >= $cpentry[9]) {
 				$timedout = true;
 				$term_cause = 5; // Session-Timeout
 			}
@@ -682,7 +689,7 @@ function captiveportal_prune_old() {
 			 *	We "fix" this by setting lastact to the login timestamp. 
 			 */
 			$lastact = $lastact ? $lastact : $cpentry[0];
-			if ($lastact && ((time() - $lastact) >= $uidletimeout)) {
+			if ($lastact && (($pruning_time - $lastact) >= $uidletimeout)) {
 				$timedout = true;
 				$term_cause = 4; // Idle-Timeout
 				$stop_time = $lastact; // Entry added to comply with WISPr
@@ -691,15 +698,16 @@ function captiveportal_prune_old() {
 
 		/* if vouchers are configured, activate session timeouts */
 		if (!$timedout && isset($config['voucher']['enable']) && !empty($cpentry[7])) {
-			if (time() >= ($cpentry[0] + $cpentry[7])) {
+			if ($pruning_time >= ($cpentry[0] + $cpentry[7])) {
 				$timedout = true;
 				$term_cause = 5; // Session-Timeout
+				$voucher_needs_sync = true;
 			}
 		}
 
 		/* if radius session_timeout is enabled and the session_timeout is not null, then check if the user should be logged out */
 		if (!$timedout && isset($config['captiveportal']['radiussession_timeout']) && !empty($cpentry[7])) {
-			if (time() >= ($cpentry[0] + $cpentry[7])) {
+			if ($pruning_time >= ($cpentry[0] + $cpentry[7])) {
 				$timedout = true;
 				$term_cause = 5; // Session-Timeout
 			}
@@ -762,6 +770,10 @@ function captiveportal_prune_old() {
 		}
 	}
 
+	if ($voucher_needs_sync == true)
+		/* Triger a sync of the vouchers on config */
+		send_event("service sync vouchers");
+
 	/* write database */
 	if (!empty($unsetindexes))
 		captiveportal_write_db($cpdb, false, $unsetindexes);
@@ -809,13 +821,12 @@ function captiveportal_disconnect($dbent, $radiusservers,$term_cause = 1,$stop_t
 	captiveportal_free_ipfw_ruleno($dbent[1]);
 
 	// XMLRPC Call over to the master Voucher node
-	$a_voucher = &$config['voucher'];
-	if(!empty($a_voucher['vouchersyncdbip'])) {
-		$syncip   = $a_voucher['vouchersyncdbip'];
-		$syncport = $a_voucher['vouchersyncport'];
-		$syncpass = $a_voucher['vouchersyncpass'];
-		$vouchersyncusername = $a_voucher['vouchersyncusername'];
-		$remote_status = xmlrpc_sync_voucher_disconnect($dben, $syncip, $syncport, $syncpass, $vouchersyncusername, $term_cause, $stop_time);
+	if(!empty($config['voucher']['vouchersyncdbip'])) {
+		$syncip   = $config['voucher']['vouchersyncdbip'];
+		$syncport = $config['voucher']['vouchersyncport'];
+		$syncpass = $config['voucher']['vouchersyncpass'];
+		$vouchersyncusername = $config['voucher']['vouchersyncusername'];
+		$remote_status = xmlrpc_sync_voucher_disconnect($dbent, $syncip, $syncport, $syncpass, $vouchersyncusername, $term_cause, $stop_time);
 	}
 
 }
@@ -827,18 +838,15 @@ function captiveportal_disconnect_client($sessionid, $term_cause = 1, $logoutRea
 	$radiusservers = captiveportal_get_radius_servers();
 	$unsetindex = array();
 
-	$cpdblck = lock('captiveportaldb', LOCK_EX);
-
 	/* read database */
-	$cpdb = captiveportal_read_db(true);
+	$cpdb = captiveportal_read_db();
 
 	/* find entry */
 	if (isset($cpdb[$sessionid])) {
 		$cpentry = $cpdb[$sessionid];
 		/* write database */
 		$unsetindex[] = $sessionid;
-		captiveportal_write_db($cpdb, true, $unsetindex);
-		unlock($cpdblck);
+		captiveportal_write_db($cpdb, false, $unsetindex);
 
 		captiveportal_disconnect($cpentry, $radiusservers, $term_cause);
 		captiveportal_logportalauth($cpentry[4], $cpentry[3], $cpentry[2], "DISCONNECT");
@@ -1115,29 +1123,29 @@ function captiveportal_init_radius_servers() {
 
 /* read RADIUS servers into array */
 function captiveportal_get_radius_servers() {
-		global $g;
+	global $g;
 
-		$cprdsrvlck = lock('captiveportalradius');
-		if (file_exists("{$g['vardb_path']}/captiveportal_radius.db")) {
-			$radiusservers = array();
-			$cpradiusdb = file("{$g['vardb_path']}/captiveportal_radius.db", 
-			FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-			if ($cpradiusdb) {
-				foreach($cpradiusdb as $cpradiusentry) {
-					$line = trim($cpradiusentry);
-					if ($line) {
-						$radsrv = array();
-						list($radsrv['ipaddr'],$radsrv['port'],$radsrv['acctport'],$radsrv['key']) = explode(",",$line);
-						$radiusservers[] = $radsrv;
-					}
+	$cprdsrvlck = lock('captiveportalradius');
+	if (file_exists("{$g['vardb_path']}/captiveportal_radius.db")) {
+		$radiusservers = array();
+		$cpradiusdb = file("{$g['vardb_path']}/captiveportal_radius.db", 
+		FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+		if ($cpradiusdb) {
+			foreach($cpradiusdb as $cpradiusentry) {
+				$line = trim($cpradiusentry);
+				if ($line) {
+					$radsrv = array();
+					list($radsrv['ipaddr'],$radsrv['port'],$radsrv['acctport'],$radsrv['key']) = explode(",",$line);
+					$radiusservers[] = $radsrv;
 				}
 			}
-			unlock($cprdsrvlck);
-			return $radiusservers;
 		}
-
 		unlock($cprdsrvlck);
-		return false;
+		return $radiusservers;
+	}
+
+	unlock($cprdsrvlck);
+	return false;
 }
 
 /* log successful captive portal authentication to syslog */
@@ -1199,7 +1207,7 @@ function radius($username,$password,$clientip,$clientmac,$type) {
 }
 
 /* read captive portal DB into array */
-function captiveportal_read_db($locked = false) {
+function captiveportal_read_db($locked = false, $index = 5 /* sessionid by default */) {
 	global $g;
 
 	$cpdb = array();
@@ -1213,7 +1221,7 @@ function captiveportal_read_db($locked = false) {
 			if ($line) {
 				$cpe = explode(",", $line);
 				/* Hash by session id */
-				$cpdb[$cpe[5]] = $cpe;
+				$cpdb[$cpe[$index]] = $cpe;
 			}
 		}
 		fclose($fd);
@@ -1233,8 +1241,12 @@ function captiveportal_write_db($cpdb, $locked = false, $remove = false) {
 	if (is_array($remove)) {
 		if (!empty($remove)) {
 			$cpdb = captiveportal_read_db(true);
-			foreach ($remove as $key)
-				unset($cpdb[$key]);
+			foreach ($remove as $key) {
+				if (is_array($key))
+					log_error("Captive portal Array passed as unset index: " . print_r($key, true));
+				else
+					unset($cpdb[$key]);
+			}
 		} else
 			return; //This makes sure no record removal calls
 	}
@@ -1613,6 +1625,9 @@ function portal_allow($clientip,$clientmac,$username,$password = null, $attribut
 		}
 	}
 
+	/* Snaphost the timestamp */
+	$allow_time = time();
+
 	foreach ($cpdb as $sid => $cpentry) {
 		/* on the same ip */
 		if($cpentry[2] == $clientip) {
@@ -1623,7 +1638,7 @@ function portal_allow($clientip,$clientmac,$username,$password = null, $attribut
 		elseif (($attributes['voucher']) && ($username != 'unauthenticated') && ($cpentry[4] == $username)) {
 			// user logged in with an active voucher. Check for how long and calculate 
 			// how much time we can give him (voucher credit - used time)
-			$remaining_time = $cpentry[0] + $cpentry[7] - time();
+			$remaining_time = $cpentry[0] + $cpentry[7] - $allow_time;
 			if ($remaining_time < 0)    // just in case. 
 				$remaining_time = 0;
 
@@ -1717,7 +1732,7 @@ function portal_allow($clientip,$clientmac,$username,$password = null, $attribut
 
 			/* encode password in Base64 just in case it contains commas */
 			$bpassword = base64_encode($password);
-			$cpdb[] = array(time(), $ruleno, $clientip, $clientmac, $username, $sessionid, $bpassword,
+			$cpdb[] = array($allow_time, $ruleno, $clientip, $clientmac, $username, $sessionid, $bpassword,
 				$attributes['session_timeout'], $attributes['idle_timeout'], $attributes['session_terminate_time']);
 
 			/* rewrite information to database */
